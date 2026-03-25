@@ -33,7 +33,7 @@ ARCGIS_DESKTOP_VERSIONS: List[Tuple[str, str]] = [
     ("10.5",   "C:/Python27/ArcGIS10.5"),
     ("10.4",   "C:/Python27/ArcGIS10.4"),
     ("10.3",   "C:/Python27/ArcGIS10.3"),
-    ("10.2.2", "C:/Python27/ArcGIS10.2"),  # instalacao presente nesta maquina
+    ("10.2.2", "C:/Python27/ArcGIS10.2"), 
 ]
 
 
@@ -592,7 +592,7 @@ def inject_css():
 # =====================================================
 
 def main():
-    st.set_page_config(page_title=CONFIG.APP_TITLE, layout="wide", page_icon="🌍")
+    st.set_page_config(page_title=CONFIG.APP_TITLE, layout="wide")
     inject_css()
 
     if not SecurityManager.check_session_timeout():
