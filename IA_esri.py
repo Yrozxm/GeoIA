@@ -339,28 +339,34 @@ class ArcGISConnector:
     ) -> bool:
         if not python_path.exists():
             return False
+
         try:
             result = subprocess.run(
                 [str(python_path), "-c", "import arcpy; print('OK')"],
-                capture_output=True, text=True, timeout=15,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
             )
-            if "OK" in result.stdout:
+
+            output = result.stdout.decode(errors="ignore") + result.stderr.decode(errors="ignore")
+
+            if "OK" in output:
                 self.python_path = python_path
                 self.version = version_label
                 self.desktop_ver = desktop_ver
-                if version_label == "pro":
-                    self.logger.add("OK", "ArcGIS Pro detetado e conectado.")
-                else:
-                    self.logger.add(
-                        "OK", f"ArcMap {desktop_ver or ''} detetado em {python_path}."
-                    )
+                self._connected = True
+                self.logger.add(
+                    "OK", f"ArcMap {desktop_ver or ''} detetado em {python_path}."
+                )
                 return True
+
         except subprocess.TimeoutExpired:
             self.logger.add("AVISO", f"Timeout ao verificar {version_label}.")
+
         except Exception as e:
             self.logger.add("ERRO", f"Erro ao verificar {version_label}: {e}")
-        return False
 
+        return False
     def is_connected(self) -> bool:
         return self._connected
 
@@ -399,18 +405,18 @@ except Exception as e:
                 return []
             safe_path = self.mxd_path.replace("\\", "\\\\")
             return self._run_arcpy(f"""
-import arcpy, json
-try:
-    mxd = arcpy.mapping.MapDocument(r"{safe_path}")
-    layers = []
-    for df in arcpy.mapping.ListDataFrames(mxd):
-        for lyr in arcpy.mapping.ListLayers(mxd, "", df):
-            if not lyr.isGroupLayer:
-                layers.append(lyr.name)
-    print(json.dumps(layers))
-except Exception as e:
-    print(json.dumps(["Erro: " + str(e)]))
-""")
+        import arcpy, json
+        try:
+            mxd = arcpy.mapping.MapDocument(r"{safe_path}")
+            layers = []
+            for df in arcpy.mapping.ListDataFrames(mxd):
+                for lyr in arcpy.mapping.ListLayers(mxd, "", df):
+                    if not lyr.isGroupLayer:
+                        layers.append(lyr.name)
+            print(json.dumps(layers))
+        except Exception as e:
+            print(json.dumps(["Erro: " + str(e)]))
+        """)
         return []
 
     def _list_layers_online(self) -> List[str]:
