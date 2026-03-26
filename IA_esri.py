@@ -799,11 +799,11 @@ def main():
         if connector.is_connected() and connector.version == "online":
 
             st.subheader("WebMap")
-
+            st.write(f"DEBUG: A procurar conteúdo para o utilizador: {connector.agol_user}")
             try:
                 webmaps = connector.gis.content.search(
-                    f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Service\")",
-                    max_items=20
+                    query_string = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\")",
+                    max_items=100
                 )
 
                 options = [{"title": wm.title, "id": wm.id} for wm in webmaps]
