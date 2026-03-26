@@ -802,7 +802,7 @@ def main():
 
             try:
                 webmaps = connector.gis.content.search(
-                    f"owner:{connector.agol_user} AND type:Web Map",
+                    f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Service\")",
                     max_items=20
                 )
 
