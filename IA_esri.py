@@ -621,29 +621,29 @@ def main():
     st.set_page_config(page_title=CONFIG.APP_TITLE, layout="wide")
     inject_css()
 
-    # 1. Verificação de Segurança
+    # 1. Primeiro, inicializamos o Logger (essencial para o conector)
+    # Certifique-se de que a classe Logger está importada corretamente
+    if "logger" not in st.session_state:
+        st.session_state["logger"] = Logger() # Ou como você inicializa seu logger
+    
+    logger = st.session_state["logger"]
+
+    # 2. Verificação de Segurança
     if not SecurityManager.check_session_timeout():
         st.warning("Sessão expirada. A reiniciar...")
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
-    # 2. INICIALIZAÇÃO DO CONNECTOR (A solução para o seu erro)
-    # Aqui garantimos que a variável 'connector' existe para o resto da função main
+    # 3. Agora sim, inicializamos o Connector passando o logger já definido
     if "arcgis_connector" not in st.session_state:
-        # Importante: substitua 'ArcGISConnector(logger)' pela sua classe de conexão real
-        st.session_state["arcgis_connector"] = ArcGISConnector(logger)
-    
+        try:
+            st.session_state["arcgis_connector"] = ArcGISConnector(logger)
+        except Exception as e:
+            st.error(f"Falha ao iniciar conector: {e}")
+            return # Para a execução se o conector falhar
+
     connector = st.session_state["arcgis_connector"]
-
-    # --- Agora o resto do seu código pode usar 'connector' sem erros ---
-    
-    # Exemplo do seu bloco anterior que dava erro:
-    if connector.is_connected() and connector.version == "online":
-        st.subheader("WebMap")
-
-    logger = LogManager()
-    security = SecurityManager()
 
     # -----------------------------------------------
     # SIDEBAR
