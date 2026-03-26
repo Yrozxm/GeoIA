@@ -12,7 +12,7 @@
 
 ## Screenshot
 
-![GeoAI Screenshot](screenshot.png)
+![GeoAI Screenshot](screenshot.PNG)
 
 ---
 
