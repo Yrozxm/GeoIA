@@ -706,7 +706,7 @@ def main():
 
         st.divider()
 
-        if st.button("Ligar / Atualizar", use_container_width=True, type="primary"):
+        if st.button("Ligar / Atualizar", width="stretch", type="primary"):
             with st.spinner("A ligar..."):
                 if "arcgis_connector" in st.session_state:
                     del st.session_state["arcgis_connector"]
@@ -791,7 +791,7 @@ def main():
         tab_layers, tab_sec, tab_logs = st.tabs(["Camadas", "Seguranca", "Logs"])
 
         with tab_layers:
-            if st.button("Atualizar camadas", use_container_width=True):
+            if st.button("Atualizar camadas", width="stretch"):
                 if connector.is_connected():
                     try:
                         with st.spinner("A listar camadas..."):
@@ -834,12 +834,12 @@ def main():
         with tab_logs:
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("Limpar", use_container_width=True):
+                if st.button("Limpar", width="stretch"):
                     logger.clear()
                     st.rerun()
             with c2:
                 st.caption(f"{len(logger.get())} entradas")
-            st.dataframe(logger.get(), use_container_width=True, hide_index=True)
+            st.dataframe(logger.get(), width="stretch", hide_index=True)
 
     # -----------------------------------------------
     # PAINEL PRINCIPAL
@@ -856,7 +856,7 @@ def main():
         with st.container(border=True):
             st.subheader("Visualizacao")
             m = folium.Map(location=CONFIG.DEFAULT_LOCATION, zoom_start=12)
-            st_folium(m, height=280, use_container_width=True)
+            st_folium(m, height=280, width="stretch")
 
         if connector.version in ("pro", "desktop", None):
             with st.container(border=True):
@@ -909,10 +909,10 @@ def main():
                 col_run, col_clear = st.columns([3, 1])
                 with col_run:
                     run_clicked = st.button(
-                        "Executar Script", use_container_width=True, type="primary"
+                        "Executar Script", width="stretch", type="primary"
                     )
                 with col_clear:
-                    if st.button("Limpar", use_container_width=True):
+                    if st.button("Limpar", width="stretch"):
                         st.rerun()
 
                 if run_clicked:
