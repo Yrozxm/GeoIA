@@ -733,10 +733,11 @@ def main():
                 elif modo == "ArcGIS Online":
                     if agol_user and agol_pass:
                         ok = connector._try_online()
-                        if not ok:
-                            SecurityManager.register_failed_login(agol_user)
-                        else:
+                        if ok:
+                            connector._connected = True  # CORRIGIDO: _try_online não define _connected
                             SecurityManager.reset_login_attempts(agol_user)
+                        else:
+                            SecurityManager.register_failed_login(agol_user)
                     else:
                         st.warning("Insere utilizador e password.")
 
