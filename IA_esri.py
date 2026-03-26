@@ -667,6 +667,7 @@ def main():
                     range(len(labels)),
                     format_func=lambda i: labels[i],
                 )
+                
                 desktop_sel = available[idx]
                 st.caption(f"Python: `{desktop_sel[1]}`")
             else:
@@ -792,95 +793,123 @@ def main():
                 st.session_state.pop("messages", None)
 
         # --- Badge de estado ---
-        connector: ArcGISConnector = st.session_state.get(
-            "arcgis_connector", ArcGISConnector(logger)
-        )
-        # --- Seleção de WebMap (ArcGIS Online) ---
-        if connector.is_connected() and connector.version == "online":
+    if connector.is_connected() and connector.version == "online":
+        st.subheader("Conteúdo do ArcGIS")
+        
+        # Debug opcional (pode comentar depois)
+        st.caption(f"Utilizador atual: {connector.agol_user}")
 
-            st.subheader("WebMap")
-            st.write(f"DEBUG: A procurar conteúdo para o utilizador: {connector.agol_user}")
-            try:
-                webmaps = connector.gis.content.search(
-                    query_string = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\")",
-                    max_items=100
+        try:
+            # A query correta usa 'query=' e engloba Feature Layers
+            q = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\" OR type:\"Feature Service\")"
+            
+            items = connector.gis.content.search(
+                query=q,
+                max_items=50
+            )
+
+            # Criamos a lista de opções formatada
+            options = [{"title": item.title, "id": item.id, "type": item.type} for item in items]
+
+            if options:
+                # 1. Recuperar o índice do que já estava selecionado para não resetar o selectbox
+                current_idx = 0
+                if "selected_webmap_id" in st.session_state:
+                    for i, opt in enumerate(options):
+                        if opt["id"] == st.session_state["selected_webmap_id"]:
+                            current_idx = i
+                            break
+
+                # 2. Selectbox único
+                selected = st.selectbox(
+                    "Escolha o mapa ou camada para análise:",
+                    options,
+                    index=current_idx,
+                    format_func=lambda x: f"{x['title']} ({x['type']})"
                 )
 
-                options = [{"title": wm.title, "id": wm.id} for wm in webmaps]
-
-                if options:
-                    selected = st.selectbox(
-                        "Seleciona WebMap",
-                        options,
-                        format_func=lambda x: x["title"]
-                    )
-
+                # 3. Atualizar o estado global APENAS se a seleção mudar
+                if selected and st.session_state.get("selected_webmap_id") != selected["id"]:
                     st.session_state["selected_webmap_id"] = selected["id"]
+                    st.session_state["active_layer_name"] = selected["title"]
+                    st.rerun()
 
-                else:
-                    st.caption("Sem WebMaps disponíveis")
-
-            except Exception as e:
-                st.error(f"Erro ao obter WebMaps: {e}")
-
-        if connector.is_connected():
-            st.markdown(
-                f'<span class="status-badge badge-ok">✓ {connector.get_version_label()}</span>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<span class="status-badge badge-err">Desconectado</span>',
-                unsafe_allow_html=True,
-            )
-
-        st.divider()
-
-        # --- Tabs: Camadas / Seguranca / Logs ---
-        tab_layers, tab_sec, tab_logs = st.tabs(["Camadas", "Seguranca", "Logs"])
-
-        with tab_layers:
-            if st.button("Atualizar camadas", use_container_width=True):
-                if connector.is_connected():
-                    if connector.version == "desktop":
-                        valid_mxd, mxd_err = validate_mxd_path(connector.mxd_path)
-                        if not valid_mxd:
-                            st.error(f"MXD invalido: {mxd_err}")
-                        else:
-                            with st.spinner("A listar camadas..."):
-                                st.session_state["layers"] = connector.list_layers()
-                    else:
-                        with st.spinner("A listar camadas..."):
-                            st.session_state["layers"] = connector.list_layers()
-                else:
-                    st.warning("Nao conectado.")
-
-            layers_list = st.session_state.get("layers", [])
-            if not layers_list:
-                st.caption("Sem camadas carregadas.")
             else:
-                for lyr in layers_list:
-                    st.caption(f"▸ {lyr}")
+                st.warning("Não foram encontrados mapas ou camadas de pontos na sua conta.")
 
-        with tab_sec:
-            st.caption("Estado de Seguranca")
-            st.info(
-                f"**Sessao:** {round((time.time() - st.session_state.get('session_start', time.time())) / 60, 1)} min\n\n"
-                f"**Timeout:** {CONFIG.SESSION_TIMEOUT_MINUTES} min\n\n"
-                f"**Rate limit:** {CONFIG.RATE_LIMIT_REQUESTS} req/{CONFIG.RATE_LIMIT_WINDOW_SECS}s\n\n"
-                f"**Max script:** {CONFIG.MAX_SCRIPT_SIZE_KB}KB"
-            )
-            st.caption("Imports permitidos:")
-            st.code(", ".join(sorted(ALLOWED_IMPORTS)))
+        except Exception as e:
+            st.error(f"Erro ao aceder ao ArcGIS: {e}")
 
-        with tab_logs:
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Limpar", use_container_width=True):
-                    logger.clear()
-            with c2:
-                st.caption(f"{len(logger.get())} entradas")
-            st.dataframe(logger.get(), use_container_width=True, hide_index=True)
+    # --- Indicador de Status na Barra Lateral ---
+    if connector.is_connected():
+        st.markdown(f'<span class="status-badge badge-ok">✓ Conectado: {connector.agol_user}</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="status-badge badge-err">Sessão Desconectada</span>', unsafe_allow_html=True)
+
+    st.divider()
+
+     # --- Tabs: Camadas / Seguranca / Logs ---
+    tab_layers, tab_sec, tab_logs = st.tabs(["Camadas", "Segurança", "Logs"])
+
+    with tab_layers:
+        if st.button("Atualizar camadas", use_container_width=True):
+            if connector.is_connected():
+                try:
+                    with st.spinner("A listar camadas..."):
+                        if connector.version == "desktop":
+                            # Validação específica para ArcGIS Desktop
+                            valid_mxd, mxd_err = validate_mxd_path(connector.mxd_path)
+                            if not valid_mxd:
+                                st.error(f"MXD inválido: {mxd_err}")
+                            else:
+                                st.session_state["layers"] = connector.list_layers()
+                        else:
+                            # Lógica para ArcGIS Online: usamos a busca que funcionou
+                            # Isso garante que Feature Layers e WebMaps apareçam na lista
+                            query = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\" OR type:\"Feature Service\")"
+                            items = connector.gis.content.search(query=query, max_items=50)
+                            st.session_state["layers"] = [f"{item.title} ({item.type})" for item in items]
+                            
+                except Exception as e:
+                    st.error(f"Erro ao atualizar: {e}")
+            else:
+                st.warning("Não conectado.")
+
+        # Exibição da lista de camadas
+        layers_list = st.session_state.get("layers", [])
+        if not layers_list:
+            st.caption("Sem camadas carregadas.")
+        else:
+            for lyr in layers_list:
+                # Destaca a camada que está selecionada no momento
+                is_active = st.session_state.get("active_layer_name") in lyr
+                prefix = "🟢" if is_active else "▸"
+                st.caption(f"{prefix} {lyr}")
+
+    with tab_sec:
+        st.caption("Estado de Segurança")
+        # Calculo do tempo de sessão
+        session_duration = round((time.time() - st.session_state.get('session_start', time.time())) / 60, 1)
+        
+        st.info(
+            f"**Sessão:** {session_duration} min\n\n"
+            f"**Timeout:** {CONFIG.SESSION_TIMEOUT_MINUTES} min\n\n"
+            f"**Rate limit:** {CONFIG.RATE_LIMIT_REQUESTS} req/{CONFIG.RATE_LIMIT_WINDOW_SECS}s\n\n"
+            f"**Max script:** {CONFIG.MAX_SCRIPT_SIZE_KB}KB"
+        )
+        st.caption("Imports permitidos:")
+        st.code(", ".join(sorted(ALLOWED_IMPORTS)))
+
+    with tab_logs:
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Limpar", use_container_width=True):
+                logger.clear()
+                st.rerun() # Recarrega para mostrar a tabela limpa
+        with c2:
+            st.caption(f"{len(logger.get())} entradas")
+        
+        st.dataframe(logger.get(), use_container_width=True, hide_index=True)
 
     # -----------------------------------------------
     # PAINEL PRINCIPAL
