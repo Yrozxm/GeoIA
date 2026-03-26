@@ -16,7 +16,6 @@ from typing import List, Dict, Optional, Tuple
 import folium
 from streamlit_folium import st_folium
 from dotenv import load_dotenv
-from utils import Logger, ArcGISConnector
 
 load_dotenv()
 
@@ -44,10 +43,6 @@ def _find_desktop_python() -> Path:
 
 
 def detect_all_desktop_versions() -> List[Tuple[str, Path]]:
-    """
-    Devolve lista de (label, caminho_python.exe) para todas as
-    instalacoes ArcGIS Desktop encontradas, da mais recente para a mais antiga.
-    """
     found: List[Tuple[str, Path]] = []
     for label, folder in ARCGIS_DESKTOP_VERSIONS:
         exe = Path(folder) / "python.exe"
@@ -237,10 +232,6 @@ class LogManager:
 
 @st.cache_data(show_spinner=False)
 def find_mxd_files(max_results: int = 20) -> List[str]:
-    """
-    Procura ficheiros .mxd em locais comuns do utilizador.
-    Nao pesquisa C:/ inteiro para evitar lentidao.
-    """
     search_roots = [
         Path.home() / "Documents",
         Path.home() / "Desktop",
@@ -263,10 +254,6 @@ def find_mxd_files(max_results: int = 20) -> List[str]:
 
 
 def validate_mxd_path(path: Optional[str]) -> Tuple[bool, str]:
-    """
-    Valida se o caminho MXD e utilizavel.
-    Devolve (valido, mensagem_erro).
-    """
     if not path or not path.strip():
         return False, "Nenhum ficheiro .mxd selecionado."
     p = Path(path)
@@ -292,20 +279,14 @@ class ArcGISConnector:
         self.logger = logger
         self.agol_user = agol_user
         self.agol_pass = agol_pass
-        # mxd_path validado externamente antes de chegar aqui
         self.mxd_path: Optional[str] = mxd_path
         self.gis = None
         self.python_path: Optional[Path] = None
-        self.version: Optional[str] = None      # "pro" | "desktop" | "online"
-        self.desktop_ver: Optional[str] = None  # ex: "10.2.2"
+        self.version: Optional[str] = None
+        self.desktop_ver: Optional[str] = None
         self._connected = False
 
-    # --------------------------------------------------
-    # Ligacao
-    # --------------------------------------------------
-
     def connect(self) -> bool:
-        """Automatico: Online -> Pro -> ArcMap (todas as versoes detetadas)."""
         self._connected = False
         if self.agol_user and self.agol_pass:
             if self._try_online():
@@ -345,7 +326,6 @@ class ArcGISConnector:
     ) -> bool:
         if not python_path.exists():
             return False
-
         try:
             result = subprocess.run(
                 [str(python_path), "-c", "import arcpy; print('OK')"],
@@ -353,9 +333,7 @@ class ArcGISConnector:
                 stderr=subprocess.PIPE,
                 timeout=30,
             )
-
             output = result.stdout.decode(errors="ignore") + result.stderr.decode(errors="ignore")
-
             if "OK" in output:
                 self.python_path = python_path
                 self.version = version_label
@@ -365,14 +343,12 @@ class ArcGISConnector:
                     "OK", f"ArcMap {desktop_ver or ''} detetado em {python_path}."
                 )
                 return True
-
         except subprocess.TimeoutExpired:
             self.logger.add("AVISO", f"Timeout ao verificar {version_label}.")
-
         except Exception as e:
             self.logger.add("ERRO", f"Erro ao verificar {version_label}: {e}")
-
         return False
+
     def is_connected(self) -> bool:
         return self._connected
 
@@ -384,10 +360,6 @@ class ArcGISConnector:
         if self.version == "online":
             return "ArcGIS Online"
         return "Desconectado"
-
-    # --------------------------------------------------
-    # Listar Camadas
-    # --------------------------------------------------
 
     def list_layers(self) -> List[str]:
         if self.version == "online":
@@ -404,50 +376,40 @@ except Exception as e:
     print(json.dumps(["Erro: " + str(e)]))
 """)
         elif self.version == "desktop":
-            # Usa sempre o caminho .mxd — nao requer ArcMap aberto
             valid, err = validate_mxd_path(self.mxd_path)
             if not valid:
                 self.logger.add("AVISO", f"list_layers: {err}")
                 return []
             safe_path = self.mxd_path.replace("\\", "\\\\")
             return self._run_arcpy(f"""
-        import arcpy, json
-        try:
-            mxd = arcpy.mapping.MapDocument(r"{safe_path}")
-            layers = []
-            for df in arcpy.mapping.ListDataFrames(mxd):
-                for lyr in arcpy.mapping.ListLayers(mxd, "", df):
-                    if not lyr.isGroupLayer:
-                        layers.append(lyr.name)
-            print(json.dumps(layers))
-        except Exception as e:
-            print(json.dumps(["Erro: " + str(e)]))
-        """)
+import arcpy, json
+try:
+    mxd = arcpy.mapping.MapDocument(r"{safe_path}")
+    layers = []
+    for df in arcpy.mapping.ListDataFrames(mxd):
+        for lyr in arcpy.mapping.ListLayers(mxd, "", df):
+            if not lyr.isGroupLayer:
+                layers.append(lyr.name)
+    print(json.dumps(layers))
+except Exception as e:
+    print(json.dumps(["Erro: " + str(e)]))
+""")
         return []
 
     def _list_layers_online(self) -> List[str]:
         try:
-            import streamlit as st
-
             webmap_id = st.session_state.get("selected_webmap_id")
-
             if not webmap_id:
                 return []
-
             item = self.gis.content.get(webmap_id)
-
             if not item:
                 return ["Erro: WebMap nao encontrado"]
-
             data = item.get_data()
             layers = []
-
             for lyr in data.get("operationalLayers", []):
                 name = lyr.get("title") or lyr.get("id") or "Sem nome"
                 layers.append(name)
-
             return layers
-
         except Exception as e:
             self.logger.add("ERRO", f"Falha ao listar layers Online: {e}")
             return []
@@ -468,10 +430,6 @@ except Exception as e:
         except Exception as e:
             self.logger.add("ERRO", f"Erro ao listar camadas: {e}")
         return []
-
-    # --------------------------------------------------
-    # Executar Script
-    # --------------------------------------------------
 
     def execute_script(self, code: str) -> Dict:
         if self.version == "online":
@@ -544,7 +502,6 @@ def build_system_prompt(connector: ArcGISConnector, layers: List[str]) -> str:
             "Nunca uses arcpy.mapping — essa API e apenas para ArcMap."
         )
         env_note = "ArcGIS Pro"
-
     elif connector.version == "desktop":
         ver = connector.desktop_ver or "10.x"
         mxd = connector.mxd_path or "CURRENT"
@@ -557,14 +514,12 @@ def build_system_prompt(connector: ArcGISConnector, layers: List[str]) -> str:
             "Ferramentas de geoprocessamento: arcpy.analysis, arcpy.management, etc."
         )
         env_note = f"ArcMap {ver}"
-
     elif connector.version == "online":
         api_note = (
             "Usa a ArcGIS API for Python (arcgis.gis). "
             "Nao uses arcpy — nao esta disponivel no modo Online."
         )
         env_note = "ArcGIS Online"
-
     else:
         api_note = "Versao ArcGIS desconhecida. Usa codigo arcpy generico."
         env_note = "ArcGIS"
@@ -622,27 +577,26 @@ def main():
     st.set_page_config(page_title=CONFIG.APP_TITLE, layout="wide")
     inject_css()
 
-    # 1. Primeiro, inicializamos o Logger (essencial para o conector)
-    # Certifique-se de que a classe Logger está importada corretamente
+    # 1. Inicializar o LogManager
     if "logger" not in st.session_state:
-        st.session_state["logger"] = Logger() # Ou como você inicializa seu logger
-    
+        st.session_state["logger"] = LogManager()  # CORRIGIDO: era Logger()
+
     logger = st.session_state["logger"]
 
-    # 2. Verificação de Segurança
+    # 2. Verificacao de Seguranca
     if not SecurityManager.check_session_timeout():
-        st.warning("Sessão expirada. A reiniciar...")
+        st.warning("Sessao expirada. A reiniciar...")
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
-    # 3. Agora sim, inicializamos o Connector passando o logger já definido
+    # 3. Inicializar o Connector
     if "arcgis_connector" not in st.session_state:
         try:
             st.session_state["arcgis_connector"] = ArcGISConnector(logger)
         except Exception as e:
             st.error(f"Falha ao iniciar conector: {e}")
-            return # Para a execução se o conector falhar
+            return
 
     connector = st.session_state["arcgis_connector"]
 
@@ -652,7 +606,6 @@ def main():
     with st.sidebar:
         st.title("Configuracao")
 
-        # --- API Key ---
         st.subheader("IA (Groq)")
         api_key = st.text_input(
             "API Key", type="password",
@@ -662,14 +615,12 @@ def main():
 
         st.divider()
 
-        # --- Modo ArcGIS ---
         st.subheader("ArcGIS")
         modo = st.radio(
             "Modo de ligacao",
             ["Automatico", "ArcGIS Online", "ArcGIS Pro", "ArcMap (Desktop)"],
         )
 
-        # --- Seletor de versao ArcMap ---
         desktop_sel: Optional[Tuple[str, Path]] = None
         if modo == "ArcMap (Desktop)":
             available = detect_all_desktop_versions()
@@ -683,7 +634,6 @@ def main():
                     range(len(labels)),
                     format_func=lambda i: labels[i],
                 )
-                
                 desktop_sel = available[idx]
                 st.caption(f"Python: `{desktop_sel[1]}`")
             else:
@@ -692,26 +642,20 @@ def main():
                     "Define `ARCGIS_DESKTOP_PYTHON` no `.env` com o caminho correto."
                 )
 
-        # --- Selecao de ficheiro MXD (apenas ArcMap) ---
         selected_mxd: Optional[str] = None
         if modo in ("ArcMap (Desktop)", "Automatico"):
             st.divider()
             st.subheader("Projeto ArcMap (.mxd)")
 
             mxd_files = find_mxd_files()
-
-            # Pre-selecionar o ultimo MXD usado
             last_mxd = st.session_state.get("last_mxd_path", "")
 
             if mxd_files:
-                # Adiciona opcao de introducao manual no final
                 options = mxd_files + ["[ Inserir caminho manualmente ]"]
-                # Tenta pre-selecionar o ultimo usado
                 default_idx = 0
                 if last_mxd and last_mxd in mxd_files:
                     default_idx = mxd_files.index(last_mxd)
                 elif last_mxd:
-                    # Ultimo nao esta na lista — coloca opcao manual selecionada
                     default_idx = len(options) - 1
 
                 sel_idx = st.selectbox(
@@ -726,9 +670,8 @@ def main():
                     selected_mxd = mxd_files[sel_idx]
                     st.caption(f"`{selected_mxd}`")
                 else:
-                    selected_mxd = None  # vai cair no text_input abaixo
-            
-            # Input manual — aparece sempre que nao ha ficheiros ou o utilizador quer outro
+                    selected_mxd = None
+
             if not mxd_files or selected_mxd is None:
                 manual = st.text_input(
                     "Caminho para o ficheiro .mxd:",
@@ -737,23 +680,20 @@ def main():
                 )
                 selected_mxd = manual.strip() if manual.strip() else None
 
-            # Validacao visual em tempo real
             if selected_mxd:
                 valid_mxd, mxd_err = validate_mxd_path(selected_mxd)
                 if valid_mxd:
                     st.success(f"✓ {Path(selected_mxd).name}")
-                    # Guarda o ultimo MXD valido
                     st.session_state["last_mxd_path"] = selected_mxd
                 else:
                     st.markdown(
                         f'<div class="mxd-warn">⚠ {mxd_err}</div>',
                         unsafe_allow_html=True,
                     )
-                    selected_mxd = None  # invalido — nao passar ao conector
+                    selected_mxd = None
             else:
                 st.caption("Nenhum .mxd selecionado.")
 
-        # --- Credenciais ArcGIS Online ---
         agol_user: Optional[str] = None
         agol_pass: Optional[str] = None
 
@@ -766,7 +706,6 @@ def main():
 
         st.divider()
 
-        # --- Botao de ligacao ---
         if st.button("Ligar / Atualizar", use_container_width=True, type="primary"):
             with st.spinner("A ligar..."):
                 if "arcgis_connector" in st.session_state:
@@ -795,137 +734,112 @@ def main():
                     if agol_user and agol_pass:
                         ok = connector._try_online()
                         if not ok:
-                            security.register_failed_login(agol_user)
+                            SecurityManager.register_failed_login(agol_user)
                         else:
-                            security.reset_login_attempts(agol_user)
+                            SecurityManager.reset_login_attempts(agol_user)
                     else:
                         st.warning("Insere utilizador e password.")
 
-                else:  # Automatico
+                else:
                     connector.connect()
 
                 st.session_state["arcgis_connector"] = connector
                 st.session_state["layers"] = []
                 st.session_state.pop("messages", None)
 
-        # --- Badge de estado ---
-    if connector.is_connected() and connector.version == "online":
-        st.subheader("Conteúdo do ArcGIS")
-        
-        # Debug opcional (pode comentar depois)
-        st.caption(f"Utilizador atual: {connector.agol_user}")
+        if connector.is_connected() and connector.version == "online":
+            st.subheader("Conteudo do ArcGIS")
+            st.caption(f"Utilizador atual: {connector.agol_user}")
 
-        try:
-            # A query correta usa 'query=' e engloba Feature Layers
-            q = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\" OR type:\"Feature Service\")"
-            
-            items = connector.gis.content.search(
-                query=q,
-                max_items=50
-            )
+            try:
+                q = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\" OR type:\"Feature Service\")"
+                items = connector.gis.content.search(query=q, max_items=50)
+                options = [{"title": item.title, "id": item.id, "type": item.type} for item in items]
 
-            # Criamos a lista de opções formatada
-            options = [{"title": item.title, "id": item.id, "type": item.type} for item in items]
+                if options:
+                    current_idx = 0
+                    if "selected_webmap_id" in st.session_state:
+                        for i, opt in enumerate(options):
+                            if opt["id"] == st.session_state["selected_webmap_id"]:
+                                current_idx = i
+                                break
 
-            if options:
-                # 1. Recuperar o índice do que já estava selecionado para não resetar o selectbox
-                current_idx = 0
-                if "selected_webmap_id" in st.session_state:
-                    for i, opt in enumerate(options):
-                        if opt["id"] == st.session_state["selected_webmap_id"]:
-                            current_idx = i
-                            break
+                    selected = st.selectbox(
+                        "Escolha o mapa ou camada para analise:",
+                        options,
+                        index=current_idx,
+                        format_func=lambda x: f"{x['title']} ({x['type']})"
+                    )
 
-                # 2. Selectbox único
-                selected = st.selectbox(
-                    "Escolha o mapa ou camada para análise:",
-                    options,
-                    index=current_idx,
-                    format_func=lambda x: f"{x['title']} ({x['type']})"
-                )
+                    if selected and st.session_state.get("selected_webmap_id") != selected["id"]:
+                        st.session_state["selected_webmap_id"] = selected["id"]
+                        st.session_state["active_layer_name"] = selected["title"]
+                        st.rerun()
+                else:
+                    st.warning("Nao foram encontrados mapas ou camadas na sua conta.")
 
-                # 3. Atualizar o estado global APENAS se a seleção mudar
-                if selected and st.session_state.get("selected_webmap_id") != selected["id"]:
-                    st.session_state["selected_webmap_id"] = selected["id"]
-                    st.session_state["active_layer_name"] = selected["title"]
-                    st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao aceder ao ArcGIS: {e}")
 
-            else:
-                st.warning("Não foram encontrados mapas ou camadas de pontos na sua conta.")
-
-        except Exception as e:
-            st.error(f"Erro ao aceder ao ArcGIS: {e}")
-
-    # --- Indicador de Status na Barra Lateral ---
-    if connector.is_connected():
-        st.markdown(f'<span class="status-badge badge-ok">✓ Conectado: {connector.agol_user}</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="status-badge badge-err">Sessão Desconectada</span>', unsafe_allow_html=True)
-
-    st.divider()
-
-     # --- Tabs: Camadas / Seguranca / Logs ---
-    tab_layers, tab_sec, tab_logs = st.tabs(["Camadas", "Segurança", "Logs"])
-
-    with tab_layers:
-        if st.button("Atualizar camadas", use_container_width=True):
-            if connector.is_connected():
-                try:
-                    with st.spinner("A listar camadas..."):
-                        if connector.version == "desktop":
-                            # Validação específica para ArcGIS Desktop
-                            valid_mxd, mxd_err = validate_mxd_path(connector.mxd_path)
-                            if not valid_mxd:
-                                st.error(f"MXD inválido: {mxd_err}")
-                            else:
-                                st.session_state["layers"] = connector.list_layers()
-                        else:
-                            # Lógica para ArcGIS Online: usamos a busca que funcionou
-                            # Isso garante que Feature Layers e WebMaps apareçam na lista
-                            query = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\" OR type:\"Feature Service\")"
-                            items = connector.gis.content.search(query=query, max_items=50)
-                            st.session_state["layers"] = [f"{item.title} ({item.type})" for item in items]
-                            
-                except Exception as e:
-                    st.error(f"Erro ao atualizar: {e}")
-            else:
-                st.warning("Não conectado.")
-
-        # Exibição da lista de camadas
-        layers_list = st.session_state.get("layers", [])
-        if not layers_list:
-            st.caption("Sem camadas carregadas.")
+        if connector.is_connected():
+            st.markdown(f'<span class="status-badge badge-ok">✓ Conectado: {connector.get_version_label()}</span>', unsafe_allow_html=True)
         else:
-            for lyr in layers_list:
-                # Destaca a camada que está selecionada no momento
-                is_active = st.session_state.get("active_layer_name") in lyr
-                prefix = "🟢" if is_active else "▸"
-                st.caption(f"{prefix} {lyr}")
+            st.markdown('<span class="status-badge badge-err">Sessao Desconectada</span>', unsafe_allow_html=True)
 
-    with tab_sec:
-        st.caption("Estado de Segurança")
-        # Calculo do tempo de sessão
-        session_duration = round((time.time() - st.session_state.get('session_start', time.time())) / 60, 1)
-        
-        st.info(
-            f"**Sessão:** {session_duration} min\n\n"
-            f"**Timeout:** {CONFIG.SESSION_TIMEOUT_MINUTES} min\n\n"
-            f"**Rate limit:** {CONFIG.RATE_LIMIT_REQUESTS} req/{CONFIG.RATE_LIMIT_WINDOW_SECS}s\n\n"
-            f"**Max script:** {CONFIG.MAX_SCRIPT_SIZE_KB}KB"
-        )
-        st.caption("Imports permitidos:")
-        st.code(", ".join(sorted(ALLOWED_IMPORTS)))
+        st.divider()
 
-    with tab_logs:
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Limpar", use_container_width=True):
-                logger.clear()
-                st.rerun() # Recarrega para mostrar a tabela limpa
-        with c2:
-            st.caption(f"{len(logger.get())} entradas")
-        
-        st.dataframe(logger.get(), use_container_width=True, hide_index=True)
+        tab_layers, tab_sec, tab_logs = st.tabs(["Camadas", "Seguranca", "Logs"])
+
+        with tab_layers:
+            if st.button("Atualizar camadas", use_container_width=True):
+                if connector.is_connected():
+                    try:
+                        with st.spinner("A listar camadas..."):
+                            if connector.version == "desktop":
+                                valid_mxd, mxd_err = validate_mxd_path(connector.mxd_path)
+                                if not valid_mxd:
+                                    st.error(f"MXD invalido: {mxd_err}")
+                                else:
+                                    st.session_state["layers"] = connector.list_layers()
+                            else:
+                                query = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\" OR type:\"Feature Service\")"
+                                items = connector.gis.content.search(query=query, max_items=50)
+                                st.session_state["layers"] = [f"{item.title} ({item.type})" for item in items]
+                    except Exception as e:
+                        st.error(f"Erro ao atualizar: {e}")
+                else:
+                    st.warning("Nao conectado.")
+
+            layers_list = st.session_state.get("layers", [])
+            if not layers_list:
+                st.caption("Sem camadas carregadas.")
+            else:
+                for lyr in layers_list:
+                    is_active = st.session_state.get("active_layer_name") in lyr
+                    prefix = "🟢" if is_active else "▸"
+                    st.caption(f"{prefix} {lyr}")
+
+        with tab_sec:
+            st.caption("Estado de Seguranca")
+            session_duration = round((time.time() - st.session_state.get('session_start', time.time())) / 60, 1)
+            st.info(
+                f"**Sessao:** {session_duration} min\n\n"
+                f"**Timeout:** {CONFIG.SESSION_TIMEOUT_MINUTES} min\n\n"
+                f"**Rate limit:** {CONFIG.RATE_LIMIT_REQUESTS} req/{CONFIG.RATE_LIMIT_WINDOW_SECS}s\n\n"
+                f"**Max script:** {CONFIG.MAX_SCRIPT_SIZE_KB}KB"
+            )
+            st.caption("Imports permitidos:")
+            st.code(", ".join(sorted(ALLOWED_IMPORTS)))
+
+        with tab_logs:
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Limpar", use_container_width=True):
+                    logger.clear()
+                    st.rerun()
+            with c2:
+                st.caption(f"{len(logger.get())} entradas")
+            st.dataframe(logger.get(), use_container_width=True, hide_index=True)
 
     # -----------------------------------------------
     # PAINEL PRINCIPAL
@@ -938,9 +852,6 @@ def main():
         "arcgis_connector", ArcGISConnector(logger)
     )
 
-    # -----------------------------------------------
-    # COLUNA ESQUERDA: Mapa + Editor
-    # -----------------------------------------------
     with col_esq:
         with st.container(border=True):
             st.subheader("Visualizacao")
@@ -951,7 +862,6 @@ def main():
             with st.container(border=True):
                 st.subheader("Editor ArcPy")
 
-                # Banner ArcMap
                 if connector.version == "desktop":
                     mxd_label = (
                         Path(connector.mxd_path).name
@@ -967,7 +877,6 @@ def main():
                         f"</div>",
                         unsafe_allow_html=True,
                     )
-                    # Aviso se MXD nao configurado
                     if not connector.mxd_path:
                         st.markdown(
                             '<div class="mxd-warn">'
@@ -985,7 +894,6 @@ def main():
                 )
                 st.markdown("")
 
-                # Pre-preenche com o ultimo codigo gerado
                 last_code = ""
                 for msg in reversed(st.session_state.get("messages", [])):
                     if msg["role"] == "assistant":
@@ -1024,15 +932,11 @@ def main():
                             with st.status("A executar script...", expanded=True) as status:
                                 res = connector.execute_script(code_input)
                                 if res["success"]:
-                                    status.update(
-                                        label="Execucao concluida", state="complete"
-                                    )
+                                    status.update(label="Execucao concluida", state="complete")
                                     if res["output"]:
                                         st.code(res["output"], language="text")
                                 else:
-                                    status.update(
-                                        label="Erro na execucao", state="error"
-                                    )
+                                    status.update(label="Erro na execucao", state="error")
                                     st.error(res["error"])
 
         elif connector.version == "online":
@@ -1042,32 +946,11 @@ def main():
                     "No modo Online nao e possivel executar scripts ArcPy locais.\n\n"
                     "Usa o assistente para gerar codigo com a ArcGIS API for Python (arcgis.gis)."
                 )
-        if connector.gis: 
-            st.subheader("Conteúdo Disponível")
-            
-            try:
-                if not connector.agol_user:
-                    query = "type:\"Feature Layer\""
-                else:
-                    query = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\")"
-                
-                webmaps = connector.gis.content.search(query=query, max_items=20)
-                
-                options = [{"title": wm.title, "id": wm.id} for wm in webmaps]
-                
-                if options:
-                    selected = st.selectbox("Seleciona a Camada", options, format_func=lambda x: x["title"])
-                    st.session_state["selected_webmap_id"] = selected["id"]
-                else:
-                    st.warning("Nenhum item encontrado no ArcGIS Online.")
-                    
-            except Exception as e:
-                st.error(f"Erro na API: {e}")
 
         if connector.is_connected():
             st.markdown('<span class="status-badge badge-ok">✓ Ligado</span>', unsafe_allow_html=True)
         else:
-            st.markdown('<span class="status-badge badge-err">Erro de Conexão</span>', unsafe_allow_html=True)
+            st.markdown('<span class="status-badge badge-err">Erro de Conexao</span>', unsafe_allow_html=True)
 
     # -----------------------------------------------
     # COLUNA DIREITA: Chat
@@ -1175,7 +1058,6 @@ def main():
 
                 st.rerun()
 
-    # Footer
     st.markdown(
         f"""
         <div class="custom-footer">
