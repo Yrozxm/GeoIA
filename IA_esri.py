@@ -997,13 +997,32 @@ def main():
                     "No modo Online nao e possivel executar scripts ArcPy locais.\n\n"
                     "Usa o assistente para gerar codigo com a ArcGIS API for Python (arcgis.gis)."
                 )
-                if connector.gis:
-                    try:
-                        me = connector.gis.users.me
-                        st.success(f"Ligado como: {me.fullName} ({me.username})")
-                        st.caption(f"Organizacao: {me.org}")
-                    except Exception:
-                        st.warning("Nao foi possivel obter info do utilizador.")
+        if connector.gis: 
+            st.subheader("Conteúdo Disponível")
+            
+            try:
+                if not connector.agol_user:
+                    query = "type:\"Feature Layer\""
+                else:
+                    query = f"owner:{connector.agol_user} AND (type:\"Web Map\" OR type:\"Feature Layer\")"
+                
+                webmaps = connector.gis.content.search(query=query, max_items=20)
+                
+                options = [{"title": wm.title, "id": wm.id} for wm in webmaps]
+                
+                if options:
+                    selected = st.selectbox("Seleciona a Camada", options, format_func=lambda x: x["title"])
+                    st.session_state["selected_webmap_id"] = selected["id"]
+                else:
+                    st.warning("Nenhum item encontrado no ArcGIS Online.")
+                    
+            except Exception as e:
+                st.error(f"Erro na API: {e}")
+
+        if connector.is_connected():
+            st.markdown('<span class="status-badge badge-ok">✓ Ligado</span>', unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="status-badge badge-err">Erro de Conexão</span>', unsafe_allow_html=True)
 
     # -----------------------------------------------
     # COLUNA DIREITA: Chat
