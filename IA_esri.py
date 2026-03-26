@@ -19,13 +19,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# =====================================================
-# VERSOES ARCGIS DESKTOP
-# Formato: (label_display, pasta_python)
-# A pasta em disco e sempre "ArcGIS10.X" (sem patch).
-# O label pode incluir patch version para mostrar ao utilizador.
-# =====================================================
-
 ARCGIS_DESKTOP_VERSIONS: List[Tuple[str, str]] = [
     ("10.8",   "C:/Python27/ArcGIS10.8"),
     ("10.7",   "C:/Python27/ArcGIS10.7"),
@@ -103,17 +96,29 @@ CONFIG = Config()
 # =====================================================
 
 DANGEROUS_PATTERNS = [
-    r"\bos\.system\b", r"\bos\.popen\b", r"\bsubprocess\b",
-    r"\bshutil\.rmtree\b", r"\bos\.remove\b", r"\bos\.unlink\b", r"\bos\.rmdir\b",
-    r"\beval\s*\(", r"\bexec\s*\(", r"\bcompile\s*\(", r"__import__\s*\(",
-    r"\bsocket\b", r"\burllib\b", r"\brequests\b", r"\bhttplib\b",
+    r"\bos\.system\b",
+    r"\bos\.popen\b",
+    r"\bsubprocess\b",
+    r"\bshutil\.rmtree\b",
+    r"\bos\.remove\b",
+    r"\bos\.unlink\b",
+    r"\bos\.rmdir\b",
+    r"\beval\s*\(",
+    r"\bexec\s*\(",
+    r"\bcompile\s*\(",
+    r"__import__\s*\(",
+    r"\bsocket\b",
+    r"\burllib\b",
+    r"\brequests\b",
+    r"\bhttplib\b",
     r"open\s*\(['\"].*\.(exe|bat|sh|ps1|cmd|reg)",
     r"(C:\\Windows|/etc/passwd|/etc/shadow)",
     r"\bimport\s+(os|sys|subprocess|shutil|socket|ctypes|winreg)\b",
     r"\bfrom\s+(os|sys|subprocess|shutil|socket|ctypes)\s+import",
-    r"\bpickle\.loads\b", r"\bpickle\.load\b", r"\bmarshal\.loads\b",
+    r"\bpickle\.loads\b",
+    r"\bpickle\.load\b",
+    r"\bmarshal\.loads\b",
 ]
-
 COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
 
 ALLOWED_IMPORTS = {
@@ -421,12 +426,27 @@ except Exception as e:
 
     def _list_layers_online(self) -> List[str]:
         try:
-            items = self.gis.content.search(
-                f"owner:{self.agol_user}",
-                item_type="Feature Layer",
-                max_items=50,
-            )
-            return [item.title for item in items]
+            import streamlit as st
+
+            webmap_id = st.session_state.get("selected_webmap_id")
+
+            if not webmap_id:
+                return []
+
+            item = self.gis.content.get(webmap_id)
+
+            if not item:
+                return ["Erro: WebMap nao encontrado"]
+
+            data = item.get_data()
+            layers = []
+
+            for lyr in data.get("operationalLayers", []):
+                name = lyr.get("title") or lyr.get("id") or "Sem nome"
+                layers.append(name)
+
+            return layers
+
         except Exception as e:
             self.logger.add("ERRO", f"Falha ao listar layers Online: {e}")
             return []
@@ -719,15 +739,13 @@ def main():
         # --- Credenciais ArcGIS Online ---
         agol_user: Optional[str] = None
         agol_pass: Optional[str] = None
+
         if modo in ("Automatico", "ArcGIS Online"):
             with st.expander(
                 "Credenciais ArcGIS Online", expanded=(modo == "ArcGIS Online")
             ):
                 agol_user = st.text_input("Utilizador", key="agol_user")
                 agol_pass = st.text_input("Password", type="password", key="agol_pass")
-                if agol_user and not security.check_login_attempts(agol_user):
-                    st.error(f"Demasiadas tentativas falhadas para '{agol_user}'.")
-                    agol_user, agol_pass = None, None
 
         st.divider()
 
@@ -777,6 +795,34 @@ def main():
         connector: ArcGISConnector = st.session_state.get(
             "arcgis_connector", ArcGISConnector(logger)
         )
+        # --- Seleção de WebMap (ArcGIS Online) ---
+        if connector.is_connected() and connector.version == "online":
+
+            st.subheader("WebMap")
+
+            try:
+                webmaps = connector.gis.content.search(
+                    f"owner:{connector.agol_user} AND type:Web Map",
+                    max_items=20
+                )
+
+                options = [{"title": wm.title, "id": wm.id} for wm in webmaps]
+
+                if options:
+                    selected = st.selectbox(
+                        "Seleciona WebMap",
+                        options,
+                        format_func=lambda x: x["title"]
+                    )
+
+                    st.session_state["selected_webmap_id"] = selected["id"]
+
+                else:
+                    st.caption("Sem WebMaps disponíveis")
+
+            except Exception as e:
+                st.error(f"Erro ao obter WebMaps: {e}")
+
         if connector.is_connected():
             st.markdown(
                 f'<span class="status-badge badge-ok">✓ {connector.get_version_label()}</span>',
